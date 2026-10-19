@@ -36,6 +36,12 @@ export interface IntroSceneProps {
   clock: RefObject<number>
   /** Fires once per stage boundary, for the caption overlay. */
   onStage?: (index: number) => void
+  /**
+   * Render this moment as a still, with no timeline. The camera is set from the
+   * sampled keyframe directly, so the frame is correct even if the render loop
+   * never advances - which is exactly what `prefers-reduced-motion` asks for.
+   */
+  staticMoment?: number
   className?: string
 }
 
@@ -45,20 +51,33 @@ export interface IntroSceneProps {
  * All choreography lives in `src/lib/introTimeline.ts`; this file only draws it.
  * Every caption it drives is written to state what is real and what is not.
  */
-export function IntroScene({ clock, onStage, className = '' }: IntroSceneProps) {
+export function IntroScene({ clock, onStage, staticMoment, className = '' }: IntroSceneProps) {
   const earthReveal = useRef(0)
   const systemReveal = useRef(0)
   const nebulaIntensity = useRef(introNebulaIntensity(0))
   const galaxyReveal = useRef(0)
 
+  // A still has no timeline to advance, so every reveal is set for that moment.
+  // Writing refs during render is safe here: they are read inside `useFrame`,
+  // never during render, and this component has no other state.
+  if (staticMoment !== undefined) {
+    earthReveal.current = introEarthReveal(staticMoment)
+    systemReveal.current = introSystemReveal(staticMoment)
+    nebulaIntensity.current = introNebulaIntensity(staticMoment)
+    galaxyReveal.current = introGalaxyReveal(staticMoment)
+  }
+
+  const startPosition: [number, number, number] =
+    staticMoment !== undefined ? sampleIntroCamera(staticMoment).position : [0, 0.95, 15]
+
   return (
     <LazyCanvas
       label="Opening sequence: the camera moves from a star field in towards a rotating Earth, then pulls back past the Sun and planets into a field of nebulae and galaxies. Every visual is labelled as NASA imagery or as a simulation."
       className={className}
-      cameraPosition={[0, 0.95, 15]}
+      cameraPosition={startPosition}
       cameraFov={42}
       cameraFar={1400}
-      animated
+      animated={staticMoment === undefined}
       fallback={
         <div className="absolute inset-0 bg-[radial-gradient(60%_50%_at_62%_45%,#123a63_0%,#060a18_60%,#04050c_100%)]" />
       }

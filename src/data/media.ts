@@ -235,3 +235,73 @@ export const MEDIA = {
 } as const satisfies Record<string, MediaAsset>
 
 export type MediaKey = keyof typeof MEDIA
+
+/* ------------------------------------------------------------------ *
+ * Textures
+ *
+ * These are the maps wrapped onto the 3D globes, not page images, so they are
+ * not `MediaAsset`s and are not rendered by `MediaFigure`. They are registered
+ * here anyway, because a texture on a globe is still an image with a source and
+ * the site promises that a picture never appears without one.
+ *
+ * The files are downloaded into `public/textures/` rather than hot-linked: no
+ * CORS surprises in WebGL, no third-party requests for the viewer, and the site
+ * does not break when an agency reorganises its CDN.
+ * ------------------------------------------------------------------ */
+
+export interface TextureCredit {
+  /** Path under `public/`. */
+  file: string
+  label: string
+  credit: string
+  /** What the map over-states, hides, or is not. */
+  caveat: string
+  source: SourceRef
+}
+
+const BLUE_MARBLE_SOURCE = nasaSource(
+  'NASA Earth Observatory',
+  'Blue Marble: Next Generation',
+  'https://science.nasa.gov/earth/earth-observatory/blue-marble-next-generation/',
+)
+
+const EARTH_AT_NIGHT_SOURCE = nasaSource(
+  'NASA',
+  'Earth at Night',
+  'https://www.nasa.gov/ebooks/earth-at-night/',
+)
+
+export const TEXTURE_CREDITS: TextureCredit[] = [
+  {
+    file: '/textures/earth-day-2048.png',
+    label: 'Day side',
+    credit: 'Credit: NASA Earth Observatory, Blue Marble: Next Generation (Reto St\u00f6ckli)',
+    caveat:
+      'A cloud-free composite of many satellite passes, not a single photograph. Deep oceans use a uniform blue where no observation existed, so coastal water blends unnaturally.',
+    source: BLUE_MARBLE_SOURCE,
+  },
+  {
+    file: '/textures/earth-night-3600.jpg',
+    label: 'Night side',
+    credit: 'Credit: NASA Earth Observatory, Black Marble (Suomi NPP VIIRS)',
+    caveat:
+      'Night lights are brightened far beyond what the eye would see from orbit, so whole cities read as a single glow.',
+    source: EARTH_AT_NIGHT_SOURCE,
+  },
+  {
+    file: '/textures/earth-clouds-2048.jpg',
+    label: 'Clouds',
+    credit: 'Credit: NASA Earth Observatory, Blue Marble cloud composite (MODIS)',
+    caveat:
+      'A single global composite, so it is a real pattern of cloud but not the weather of any particular day. Real clouds move within hours.',
+    source: BLUE_MARBLE_SOURCE,
+  },
+]
+
+/**
+ * What the 3D globes exaggerate, stated once so every scene can say it.
+ * Continents are not that rugged at this scale, and the atmosphere is thicker
+ * in the render than it is in reality.
+ */
+export const GLOBE_CAVEAT =
+  'Continent relief and the atmosphere are both exaggerated so they are visible at this size. On a real globe seen from this distance, mountains would be invisible and the air a thinner line than this.'

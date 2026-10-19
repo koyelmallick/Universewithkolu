@@ -67,7 +67,7 @@ export const INTRO_STAGES: IntroStage[] = [
       'The Sun and planets. Sizes are enlarged and orbits compressed; the order of the planets and the length of their years are real.',
     kind: 'simulation',
     deeper:
-      'Planet positions come from real orbital periods, sped up roughly 300,000 times. Nothing here is to scale - if it were, the planets would be invisible specks.',
+      'Planet positions come from real orbital periods, sped up roughly 300,000 times, and brightness is equalised across the frame - Neptune is not really as brightly lit as Mercury. Nothing here is to scale: if it were, the planets would be invisible specks.',
   },
   {
     id: 'cosmic',

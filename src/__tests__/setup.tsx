@@ -68,4 +68,11 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
 
 afterEach(() => {
   cleanup()
+  // The opening sequence remembers that it has played. Keep tests hermetic so
+  // one suite cannot silently disable the intro for another.
+  try {
+    window.localStorage.clear()
+  } catch {
+    /* storage unavailable */
+  }
 })

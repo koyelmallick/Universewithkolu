@@ -1,3 +1,4 @@
+import { GLOBE_CAVEAT, TEXTURE_CREDITS } from '../data'
 import { EarthScene } from '../components/three/EarthScene'
 import { Reveal } from '../components/layout/SectionShell'
 
@@ -25,13 +26,18 @@ const HERO_STATS = [
   },
 ]
 
+export interface HeroProps {
+  /** Present once the opening sequence exists; re-runs it without a reload. */
+  onReplayIntro?: () => void
+}
+
 /**
  * Cinematic hero: the real NASA Blue Marble rotating behind the headline.
  *
  * The scrim is `pointer-events-none` so dragging still reaches the globe, and
  * the ambient glow is a CSS radial gradient rather than a bloom pass.
  */
-export function Hero() {
+export function Hero({ onReplayIntro }: HeroProps) {
   return (
     <section
       id="top"
@@ -61,25 +67,30 @@ export function Hero() {
         <div className="max-w-2xl">
           <Reveal>
             <p className="eyebrow flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span>Explore the Universe</span>
+              <span aria-hidden="true" className="text-hairline-strong">
+                /
+              </span>
               <span>An interactive guide to space and Earth</span>
             </p>
           </Reveal>
 
           <Reveal index={1}>
             <h1 className="mt-5 font-display text-4xl leading-[1.05] font-semibold tracking-tight text-ink sm:text-6xl lg:text-7xl">
-              Explore the
+              The Universe Is Bigger
               <span className="text-glow bg-gradient-to-r from-ion via-[#8fd0ff] to-nebula bg-clip-text text-transparent">
                 {' '}
-                Universe
+                Than We Imagine
               </span>
             </h1>
           </Reveal>
 
           <Reveal index={2}>
             <p className="prose-space mt-6 text-base sm:text-lg">
-              From the molten core under your feet to galaxies 13 billion light-years away. Every
-              explanation here starts from zero, every number links to the document it came from,
-              and every picture is labelled as a real photograph, a simulation, or an illustration.
+              Start at the ground beneath you and keep going: continents, planets, stars, the
+              edge of the observable universe. Every explanation here starts from zero, every
+              number links to the document it came from, and every visual is labelled as a real
+              photograph, a simulation, or an illustration.
             </p>
           </Reveal>
 
@@ -100,6 +111,18 @@ export function Hero() {
               >
                 How to read this site
               </a>
+              {onReplayIntro ? (
+                <button
+                  type="button"
+                  onClick={onReplayIntro}
+                  className="inline-flex min-h-12 items-center gap-2 rounded-full px-4 text-sm font-semibold text-ink-muted transition-colors duration-300 hover:text-ion"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                    <path d="M4 12a8 8 0 1 0 2.6-5.9M4 4v4.5h4.5" />
+                  </svg>
+                  Replay opening
+                </button>
+              ) : null}
             </div>
           </Reveal>
 
@@ -143,6 +166,34 @@ export function Hero() {
               </div>
             ))}
           </dl>
+        </Reveal>
+
+        {/* Provenance for the thing filling the screen. Collapsed by default so
+            it never competes with the headline, but never hidden entirely. */}
+        <Reveal index={6}>
+          <details className="mt-8 max-w-2xl text-xs text-ink-faint">
+            <summary className="cursor-pointer rounded text-[0.6875rem] tracking-wide uppercase transition-colors hover:text-ion">
+              What this globe is made of
+            </summary>
+            <div className="mt-3 space-y-2 border-l-2 border-hairline pl-4">
+              <p className="max-w-xl leading-relaxed">{GLOBE_CAVEAT}</p>
+              {TEXTURE_CREDITS.map((texture) => (
+                <p key={texture.file} className="leading-relaxed">
+                  <span className="font-semibold text-ink-muted">{texture.label}:</span>{' '}
+                  {texture.credit}.{' '}
+                  <a
+                    href={texture.source.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline decoration-dotted transition-colors hover:text-ion"
+                  >
+                    {texture.source.title}
+                  </a>
+                  <span className="block text-ink-faint/80">{texture.caveat}</span>
+                </p>
+              ))}
+            </div>
+          </details>
         </Reveal>
       </div>
 

@@ -171,7 +171,12 @@ export function IntroSequence({ onDone }: IntroSequenceProps) {
       }`}
     >
       <div className="absolute inset-0">
-        <IntroScene clock={clock} onStage={handleStage} className="h-full w-full" />
+        <IntroScene
+          clock={clock}
+          onStage={handleStage}
+          staticMoment={reducedMotion ? STATIC_MOMENT : undefined}
+          className="h-full w-full"
+        />
       </div>
 
       {/* Text scrim, so the captions hold over the brightest part of the sky. */}

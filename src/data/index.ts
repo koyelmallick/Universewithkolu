@@ -3,15 +3,15 @@ export { EARTH_TOPICS, EARTH_SOURCE_ROLLUP } from './earthTopics'
 export { SCIENCE_TOPICS, SCIENCE_SOURCES } from './scienceTopics'
 export { MISSIONS, MISSION_SOURCES } from './missions'
 export { DISCOVERIES, DISCOVERY_SOURCES, discoveryForDate } from './discoveries'
-export { MEDIA, nasaImage, nasaAssetPage } from './media'
-export type { MediaKey } from './media'
+export { MEDIA, nasaImage, nasaAssetPage, TEXTURE_CREDITS, GLOBE_CAVEAT } from './media'
+export type { MediaKey, TextureCredit } from './media'
 
 import { PLANETS } from './planets'
 import { EARTH_TOPICS } from './earthTopics'
 import { SCIENCE_TOPICS } from './scienceTopics'
 import { DISCOVERIES } from './discoveries'
 import { MISSIONS } from './missions'
-import { MEDIA } from './media'
+import { MEDIA, TEXTURE_CREDITS } from './media'
 import type { MediaAsset, SourceRef, Topic } from '../types/content'
 
 /** All long-form topics across the site, in page order. */
@@ -46,5 +46,6 @@ export const ALL_SOURCES: SourceRef[] = (() => {
     collect(m.source)
     if (m.media) collect(m.media.source)
   }
+  for (const texture of TEXTURE_CREDITS) collect(texture.source)
   return [...byUrl.values()].sort((a, b) => a.publisher.localeCompare(b.publisher))
 })()
