@@ -95,7 +95,7 @@ export const INTRO_CLOSING_SECONDS = 2.4
 export const INTRO_TOTAL_SECONDS = INTRO_SECONDS + INTRO_CLOSING_SECONDS
 
 /** Start time of each stage, in seconds. */
-export const INTRO_STAGE_STARTS: number[] = INTRO_STAGES.reduce<number[]>((starts, stage, index) => {
+export const INTRO_STAGE_STARTS: number[] = INTRO_STAGES.reduce<number[]>((starts, _stage, index) => {
   starts.push(index === 0 ? 0 : starts[index - 1] + INTRO_STAGES[index - 1].seconds)
   return starts
 }, [])

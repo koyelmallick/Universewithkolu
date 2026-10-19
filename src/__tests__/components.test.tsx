@@ -1,7 +1,9 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import App from '../App'
+import { IntroSequence } from '../components/intro/IntroSequence'
+import { hasSeenIntro } from '../lib/introStorage'
 import { CosmicDiscovery } from '../sections/CosmicDiscovery'
 import { ExploreEarth } from '../sections/ExploreEarth'
 import { ExploreSpace } from '../sections/ExploreSpace'
@@ -13,9 +15,16 @@ function renderApp() {
 }
 
 describe('hero', () => {
-  it('states the site name as the top-level heading', () => {
+  it('leads with the site thesis as the top-level heading', () => {
     render(<Hero />)
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/explore the universe/i)
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
+      /the universe is bigger\s+than we imagine/i,
+    )
+  })
+
+  it('keeps the site name in the eyebrow', () => {
+    render(<Hero />)
+    expect(screen.getByText(/explore the universe/i)).toBeInTheDocument()
   })
 
   it('mounts a 3D canvas and describes what it shows', () => {
@@ -25,6 +34,26 @@ describe('hero', () => {
     const region = screen.getByRole('img', { name: /3d earth/i })
     expect(region).toHaveAttribute('aria-label')
     expect(region.getAttribute('aria-label')).toMatch(/drag to rotate/i)
+    expect(region.getAttribute('aria-label')).toMatch(/cloud/i)
+  })
+
+  it('credits the textures wrapped onto the globe', () => {
+    render(<Hero />)
+    // The provenance panel is collapsed, but its content must be in the DOM:
+    // a texture is still an image, and the site promises a source for each.
+    expect(screen.getByText(/what this globe is made of/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/blue marble/i).length).toBeGreaterThan(0)
+    // Day texture and cloud texture share the same source, so both link to it.
+    const blueMarbleLinks = screen.getAllByRole('link', { name: /blue marble: next generation/i })
+    expect(blueMarbleLinks.length).toBeGreaterThan(0)
+    for (const link of blueMarbleLinks) {
+      expect(link).toHaveAttribute(
+        'href',
+        'https://science.nasa.gov/earth/earth-observatory/blue-marble-next-generation/',
+      )
+    }
+    expect(screen.getAllByText(/black marble/i).length).toBeGreaterThan(0)
+    expect(screen.getByRole('link', { name: /earth at night/i })).toBeInTheDocument()
   })
 
   it('offers a way into the content and into the method statement', () => {
@@ -34,6 +63,39 @@ describe('hero', () => {
       'href',
       '#method',
     )
+  })
+
+  it('only offers a replay control when the opening sequence exists', async () => {
+    const onReplay = vi.fn()
+    const { rerender } = render(<Hero />)
+    expect(screen.queryByRole('button', { name: /replay opening/i })).not.toBeInTheDocument()
+
+    rerender(<Hero onReplayIntro={onReplay} />)
+    await userEvent.click(screen.getByRole('button', { name: /replay opening/i }))
+    expect(onReplay).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('opening sequence', () => {
+  it('can be skipped, and remembers that it has played', async () => {
+    const onDone = vi.fn()
+    render(<IntroSequence onDone={onDone} />)
+
+    expect(screen.getByRole('dialog', { name: /opening sequence/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /skip intro/i })).toBeInTheDocument()
+
+    // Marked on mount, so a reload mid-sequence cannot trap the visitor.
+    expect(hasSeenIntro()).toBe(true)
+
+    await userEvent.click(screen.getByRole('button', { name: /skip intro/i }))
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1), { timeout: 2000 })
+  })
+
+  it('dismisses on Escape', async () => {
+    const onDone = vi.fn()
+    render(<IntroSequence onDone={onDone} />)
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1), { timeout: 2000 })
   })
 })
 

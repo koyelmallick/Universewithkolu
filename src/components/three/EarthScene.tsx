@@ -1,7 +1,8 @@
 import { OrbitControls, Stars } from '@react-three/drei'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
 import { useReducedMotion } from '../../hooks/useReducedMotion'
-import { EARTH_SUN_DIRECTION, EarthGlobe } from './EarthGlobe'
+import { EARTH_SUN_DIRECTION } from './earthDefaults'
+import { EarthGlobe } from './EarthGlobe'
 import { LazyCanvas } from './LazyCanvas'
 import { NebulaBackdrop } from './NebulaBackdrop'
 

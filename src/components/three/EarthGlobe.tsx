@@ -1,21 +1,19 @@
 import { useFrame } from '@react-three/fiber'
-import { useMemo, useRef, type RefObject } from 'react'
+import { useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { useReducedMotion } from '../../hooks/useReducedMotion'
 import { hexToLinear } from '../../lib/color'
 import { useSafeTexture } from '../../lib/useSafeTexture'
+import { EARTH_SUN_DIRECTION } from './earthDefaults'
+import { readLive, type LiveOrStatic } from './liveValue'
 import { ATMOSPHERE_FRAG, ATMOSPHERE_VERT, EARTH_FRAG, EARTH_VERT } from './shaders'
 
-/**
- * World-space direction of the Sun in a globe scene.
- *
- * Shared by the light and the surface shader, so the terminator and the
- * specular glint can never drift apart.
- */
-export const EARTH_SUN_DIRECTION = new THREE.Vector3(4.2, 1.5, 3.4).normalize()
-
 /** Earth's real axial tilt, in radians (23.44 degrees). */
-export const EARTH_AXIAL_TILT = THREE.MathUtils.degToRad(23.44)
+const EARTH_AXIAL_TILT = THREE.MathUtils.degToRad(23.44)
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value))
+}
 
 const DAY_TEXTURE = '/textures/earth-day-2048.png'
 const NIGHT_TEXTURE = '/textures/earth-night-3600.jpg'
@@ -33,8 +31,11 @@ function useEmptyTexture() {
 export interface EarthGlobeProps {
   /** Scene units. The geometry is a unit sphere, so this is the radius. */
   radius?: number
-  /** 0 = unlit, 1 = fully exposed. Read from a ref so it never re-renders React. */
-  revealRef?: RefObject<number>
+  /**
+   * Exposure, 0 = unlit, 1 = fully lit. A constant for the hero; a function of
+   * the opening sequence's clock when Earth rises out of the dark.
+   */
+  reveal?: LiveOrStatic
   /** Sun direction in world space, for the shader and the atmosphere shell. */
   sunDirection?: THREE.Vector3
   /** Cloud coverage. Below ~0.9 the layer reads as thin haze. */
@@ -53,7 +54,7 @@ export interface EarthGlobeProps {
  */
 export function EarthGlobe({
   radius = 1,
-  revealRef,
+  reveal,
   sunDirection = EARTH_SUN_DIRECTION,
   cloudStrength = 1.02,
   reliefStrength = 0.35,
@@ -66,12 +67,12 @@ export function EarthGlobe({
       <group rotation={[0, 0, EARTH_AXIAL_TILT]}>
         <EarthSurface
           reducedMotion={reducedMotion}
-          revealRef={revealRef}
+          reveal={reveal}
           sunDirection={sunDirection}
           cloudStrength={cloudStrength}
           reliefStrength={reliefStrength}
         />
-        <Atmosphere revealRef={revealRef} sunDirection={sunDirection} />
+        <Atmosphere reveal={reveal} sunDirection={sunDirection} />
       </group>
     </group>
   )
@@ -79,7 +80,7 @@ export function EarthGlobe({
 
 interface SurfaceProps {
   reducedMotion: boolean
-  revealRef?: RefObject<number>
+  reveal?: LiveOrStatic
   sunDirection: THREE.Vector3
   cloudStrength: number
   reliefStrength: number
@@ -87,7 +88,7 @@ interface SurfaceProps {
 
 function EarthSurface({
   reducedMotion,
-  revealRef,
+  reveal,
   sunDirection,
   cloudStrength,
   reliefStrength,
@@ -99,6 +100,10 @@ function EarthSurface({
   const dayMap = useSafeTexture(DAY_TEXTURE, { colorSpace: 'srgb', anisotropy: 8 })
   const nightMap = useSafeTexture(NIGHT_TEXTURE, { colorSpace: 'srgb', anisotropy: 8 })
   const cloudMap = useSafeTexture(CLOUD_TEXTURE, { colorSpace: 'srgb', anisotropy: 4 })
+
+  // A still frame hands over a constant; an animated one hands over a function
+  // of the clock, whose first frame corrects this before anything is painted.
+  const initialReveal = typeof reveal === 'number' ? clamp01(reveal) : 1
 
   // Textures are a dependency rather than being assigned into a stable uniforms
   // object: mutating hook output during render is what causes the
@@ -113,10 +118,18 @@ function EarthSurface({
       uCloudStrength: { value: cloudMap ? cloudStrength : 0 },
       uReliefStrength: { value: reliefStrength },
       uTime: { value: 0 },
-      uReveal: { value: Math.min(1, Math.max(0, revealRef?.current ?? 1)) },
+      uReveal: { value: initialReveal },
     }),
-    // `revealRef` is deliberately absent: it is read live, not captured.
-    [dayMap, nightMap, cloudMap, empty, sunDirection, cloudStrength, reliefStrength],
+    [
+      dayMap,
+      nightMap,
+      cloudMap,
+      empty,
+      sunDirection,
+      cloudStrength,
+      reliefStrength,
+      initialReveal,
+    ],
   )
 
   useFrame((_, delta) => {
@@ -130,8 +143,8 @@ function EarthSurface({
       if (materialRef.current) materialRef.current.uniforms.uTime.value += delta
     }
 
-    if (revealRef && materialRef.current) {
-      materialRef.current.uniforms.uReveal.value = Math.min(1, Math.max(0, revealRef.current))
+    if (reveal !== undefined && materialRef.current) {
+      materialRef.current.uniforms.uReveal.value = clamp01(readLive(reveal, 1))
     }
   })
 
@@ -161,13 +174,15 @@ function EarthSurface({
 }
 
 function Atmosphere({
-  revealRef,
+  reveal,
   sunDirection,
 }: {
-  revealRef?: RefObject<number>
+  reveal?: LiveOrStatic
   sunDirection: THREE.Vector3
 }) {
   const materialRef = useRef<THREE.ShaderMaterial>(null)
+
+  const initialReveal = typeof reveal === 'number' ? clamp01(reveal) : 1
 
   const uniforms = useMemo(
     () => ({
@@ -176,14 +191,14 @@ function Atmosphere({
       uSunDirection: { value: sunDirection.clone() },
       uPower: { value: 2.9 },
       uIntensity: { value: 1.2 },
-      uReveal: { value: Math.min(1, Math.max(0, revealRef?.current ?? 1)) },
+      uReveal: { value: initialReveal },
     }),
-    [sunDirection, revealRef],
+    [sunDirection, initialReveal],
   )
 
   useFrame(() => {
-    if (revealRef && materialRef.current) {
-      materialRef.current.uniforms.uReveal.value = Math.min(1, Math.max(0, revealRef.current))
+    if (reveal !== undefined && materialRef.current) {
+      materialRef.current.uniforms.uReveal.value = clamp01(readLive(reveal, 1))
     }
   })
 

@@ -1,12 +1,13 @@
 import { useFrame } from '@react-three/fiber'
-import { useMemo, useRef, type RefObject } from 'react'
+import { useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { hexToLinear } from '../../lib/color'
+import { readLive, type LiveOrStatic } from './liveValue'
 import { NEBULA_FRAG, NEBULA_VERT } from './nebulaShader'
 
 interface NebulaBackdropProps {
   /** Overall brightness. Keep low - this is a backdrop, not a subject. */
-  intensity?: number
+  intensity?: LiveOrStatic
   deep?: string
   mid?: string
   warm?: string
@@ -15,8 +16,6 @@ interface NebulaBackdropProps {
    * origin, or the camera flies out through the sky and sees nothing.
    */
   radius?: number
-  /** Live brightness, for scenes that grow the sky as they pull outward. */
-  intensityRef?: RefObject<number>
 }
 
 /**
@@ -32,24 +31,27 @@ export function NebulaBackdrop({
   mid = '#4c2a86',
   warm = '#b06a3a',
   radius = 90,
-  intensityRef,
 }: NebulaBackdropProps) {
   const materialRef = useRef<THREE.ShaderMaterial>(null)
+
+  // A live intensity is opaque to the initial uniform; the first frame corrects
+  // it before anything is painted. A constant is used as-is.
+  const initial = typeof intensity === 'number' ? intensity : 1
 
   const uniforms = useMemo(
     () => ({
       uColorDeep: { value: hexToLinear(deep) },
       uColorMid: { value: hexToLinear(mid) },
       uColorWarm: { value: hexToLinear(warm) },
-      uIntensity: { value: intensity },
+      uIntensity: { value: initial },
     }),
-    [deep, mid, warm, intensity],
+    [deep, mid, warm, initial],
   )
 
   // Optional live brightness, for scenes that grow the sky as they pull out.
   useFrame(() => {
-    if (!intensityRef || !materialRef.current) return
-    materialRef.current.uniforms.uIntensity.value = intensityRef.current ?? intensity
+    if (!materialRef.current) return
+    materialRef.current.uniforms.uIntensity.value = readLive(intensity, initial)
   })
 
   return (

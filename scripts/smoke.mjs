@@ -5,11 +5,14 @@
  * compile or a scene that throws inside `useFrame`. This script drives a real
  * Chrome instance over the DevTools Protocol and checks that:
  *
- *   1. the page loads with no console errors and no uncaught exceptions,
- *   2. all six sections and their anchor targets exist,
- *   3. the hero actually created a WebGL context with a non-zero drawing buffer,
- *   4. tab interactions switch content,
- *   5. there is no horizontal overflow at 390px, 768px and 1920px.
+ *   1. the opening sequence plays on a first visit, can be skipped, and does
+ *      not play again on a reload,
+ *   2. the page loads with no console errors and no uncaught exceptions,
+ *   3. all six sections and their anchor targets exist,
+ *   4. the hero actually created a WebGL context with a non-zero drawing buffer,
+ *   5. tab interactions switch content,
+ *   6. there is no horizontal overflow at 390px, 768px and 1920px,
+ *   7. the reduced-motion opening works and lets the visitor in unaided.
  *
  * It uses only Node built-ins plus an already-installed Chrome, so there is
  * nothing extra to install.
@@ -199,10 +202,69 @@ async function main() {
     await session.send('Page.navigate', { url: BASE_URL })
     await loaded
 
+    // --- 1. opening sequence ------------------------------------------
+    // The profile is fresh, so this is a first visit: it must be playing.
+    await sleep(1200)
+    const intro = await session.evaluate(`
+      (() => {
+        const overlay = document.querySelector('[data-testid="intro-overlay"]')
+        return {
+          present: !!overlay,
+          dialog: overlay?.getAttribute('role') === 'dialog',
+          skip: !!overlay?.querySelector('[data-intro-dismiss]'),
+          scrollLocked: document.body.style.overflow === 'hidden',
+          h1: document.querySelector('#top h1')?.textContent?.trim() ?? '',
+        }
+      })()
+    `)
+
+    if (!intro.present) fail('Opening sequence did not play on a first visit')
+    if (intro.present && !intro.dialog) fail('Opening sequence is not exposed as a dialog')
+    if (intro.present && !intro.skip) fail('Opening sequence has no skip control')
+    if (intro.present && !intro.scrollLocked) fail('Opening sequence did not lock page scroll')
+    if (!/bigger than we imagine/i.test(intro.h1)) {
+      fail(`Hero h1 wrong: ${intro.h1}`)
+    }
+
+    // Skip it, and make sure it genuinely lets go of the page.
+    if (intro.present) {
+      await session.evaluate(`document.querySelector('[data-intro-dismiss]')?.click()`)
+      await sleep(900)
+      const skipped = await session.evaluate(`
+        (() => ({
+          present: !!document.querySelector('[data-testid="intro-overlay"]'),
+          scrollLocked: document.body.style.overflow === 'hidden',
+          replay: [...document.querySelectorAll('#top button')]
+            .some((button) => /replay/i.test(button.textContent ?? '')),
+        }))()
+      `)
+      if (skipped.present) fail('Skip intro did not dismiss the opening sequence')
+      if (skipped.scrollLocked) fail('Skip intro left the page scroll-locked')
+      if (!skipped.replay) fail('No replay control in the hero after the intro')
+      note('Opening sequence: played on first visit, skipped cleanly, replay control present')
+    }
+
+    // A normal reload must not show it again.
+    const reloaded = new Promise((resolve) => session.on('Page.loadEventFired', resolve))
+    await session.send('Page.reload')
+    await reloaded
+    await sleep(2000)
+    const afterReload = await session.evaluate(`
+      (() => ({
+        present: !!document.querySelector('[data-testid="intro-overlay"]'),
+        stored: (() => {
+          try { return localStorage.getItem('etu:intro-seen-v1') } catch { return null }
+        })(),
+      }))()
+    `)
+    if (afterReload.present) fail('Opening sequence played again on a reload')
+    if (afterReload.stored !== '1') fail('Opening sequence did not remember that it has played')
+    note('Opening sequence: refused to replay on reload')
+
     // Let React mount and the lazily-mounted canvases initialise.
     await sleep(4000)
 
-    // --- 1. structure -------------------------------------------------
+    // --- 2. structure -------------------------------------------------
     const structure = await session.evaluate(`
       (() => {
         const ids = ['top','space','earth','science','human','discovery','method']
@@ -213,12 +275,15 @@ async function main() {
           navLinks: [...document.querySelectorAll('nav a[href^="#"]')].map((a) => a.getAttribute('href')),
           canvasCount: document.querySelectorAll('canvas').length,
           sectionCount: document.querySelectorAll('section').length,
+          cloudTexture: performance.getEntriesByType('resource')
+            .some((entry) => entry.name.includes('earth-clouds-2048')),
+          provenance: !!document.querySelector('#top details a[href*="blue-marble"]'),
         }
       })()
     `)
 
     if (!/Explore the Universe/i.test(structure.title)) fail(`Unexpected title: ${structure.title}`)
-    if (!/Explore the Universe/i.test(structure.heading ?? '')) {
+    if (!/The Universe Is Bigger/i.test(structure.heading ?? '')) {
       fail(`Hero h1 missing or wrong: ${structure.heading}`)
     }
     if (structure.missingSections.length) {
@@ -227,9 +292,12 @@ async function main() {
     for (const id of ['#space', '#earth', '#science', '#human', '#discovery']) {
       if (!structure.navLinks.includes(id)) fail(`Navbar is missing a link to ${id}`)
     }
+    if (!structure.cloudTexture) fail('The hero never requested the NASA cloud texture')
+    if (!structure.provenance) fail('The hero does not link the globe textures to their source')
     note(`Canvases on the page: ${structure.canvasCount}`)
+    note('Hero: cloud texture loaded and texture provenance linked')
 
-    // --- 2. WebGL actually works -------------------------------------
+    // --- 3. WebGL actually works -------------------------------------
     // Pick a canvas that is inside a scene region: the first canvas on the page
     // belongs to the 2D starfield, which has no WebGL context by design.
     const webgl = await session.evaluate(`
@@ -261,7 +329,7 @@ async function main() {
       note(`WebGL ${webgl.version} | ${webgl.width}x${webgl.height} | ${webgl.renderer}`)
     }
 
-    // --- 3. tab interactions -----------------------------------------
+    // --- 4. tab interactions -----------------------------------------
     const clickTab = async (name) =>
       session.evaluate(`
         (() => {
@@ -307,7 +375,7 @@ async function main() {
       if (brokenImages > 0) fail(`${brokenImages} image(s) failed to load`)
     }
 
-    // --- 4. responsive overflow --------------------------------------
+    // --- 5. responsive overflow --------------------------------------
     for (const width of [390, 768, 1920]) {
       await session.send('Emulation.setDeviceMetricsOverride', {
         width,
@@ -322,7 +390,7 @@ async function main() {
       if (overflow > 2) fail(`Horizontal overflow of ${overflow}px at ${width}px wide`)
     }
 
-    // --- 5. reduced motion -------------------------------------------
+    // --- 6. reduced motion -------------------------------------------
     await session.send('Emulation.setEmulatedMedia', {
       features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
     })
@@ -337,9 +405,44 @@ async function main() {
       `!!document.querySelector('canvas') && document.querySelectorAll('section').length >= 6`,
     )
     if (!stillRendering) fail('Page broke under prefers-reduced-motion')
+
+    // --- 7. reduced-motion opening -----------------------------------
+    // The sequence still runs, as a still, with no camera move to sit through.
+    await session.evaluate(`localStorage.removeItem('etu:intro-seen-v1')`)
+    const stillReloaded = new Promise((resolve) => session.on('Page.loadEventFired', resolve))
+    await session.send('Page.reload')
+    await stillReloaded
+    await sleep(2000)
+
+    const stillIntro = await session.evaluate(`
+      (() => {
+        const overlay = document.querySelector('[data-testid="intro-overlay"]')
+        return {
+          present: !!overlay,
+          dismiss: !!overlay?.querySelector('[data-intro-dismiss]'),
+          labelled: /simulations/i.test(overlay?.textContent ?? ''),
+        }
+      })()
+    `)
+    if (!stillIntro.present) fail('Reduced-motion opening did not render')
+    if (stillIntro.present && !stillIntro.dismiss) {
+      fail('Reduced-motion opening has no way into the site')
+    }
+    if (stillIntro.present && !stillIntro.labelled) {
+      fail('Reduced-motion opening does not label its simulations')
+    }
+
+    // It must let the visitor in without any interaction.
+    await sleep(6500)
+    const stillGone = await session.evaluate(
+      `!document.querySelector('[data-testid="intro-overlay"]')`,
+    )
+    if (!stillGone) fail('Reduced-motion opening did not auto-enter the site')
+    note('Reduced motion: still opening rendered and auto-dismissed')
+
     await session.send('Emulation.setEmulatedMedia', { features: [] })
 
-    // --- 6. console audit --------------------------------------------
+    // --- 8. console audit --------------------------------------------
     const ignorable = /favicon|DevTools|Autofill|React DevTools|Download the React/i
     const realErrors = consoleErrors.filter((line) => !ignorable.test(line))
     if (realErrors.length) {

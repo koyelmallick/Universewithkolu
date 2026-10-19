@@ -12,8 +12,10 @@ import {
   introSystemReveal,
   sampleIntroCamera,
 } from '../../lib/introTimeline'
-import { EARTH_SUN_DIRECTION, EarthGlobe } from './EarthGlobe'
+import { EARTH_SUN_DIRECTION } from './earthDefaults'
+import { EarthGlobe } from './EarthGlobe'
 import { LazyCanvas } from './LazyCanvas'
+import { type LiveOrStatic, type LiveValue } from './liveValue'
 import { NebulaBackdrop } from './NebulaBackdrop'
 import { DISTANT_GALAXY_FRAG, DISTANT_GALAXY_VERT, SUN_GLOW_FRAG, SUN_GLOW_VERT } from './shaders'
 
@@ -31,15 +33,18 @@ const SUN_ENLARGE = 2.7
 /** Where the Sun sits in the opening's composition, off-centre and deep. */
 const SOLAR_ANCHOR: [number, number, number] = [-3.4, 0.3, -6.5]
 
+/** How visible the orbit rings get, relative to the solar system's fade. */
+const RING_OPACITY = 0.16
+
 export interface IntroSceneProps {
   /** Elapsed seconds. Read live inside `useFrame`, never captured. */
   clock: RefObject<number>
   /** Fires once per stage boundary, for the caption overlay. */
   onStage?: (index: number) => void
   /**
-   * Render this moment as a still, with no timeline. The camera is set from the
-   * sampled keyframe directly, so the frame is correct even if the render loop
-   * never advances - which is exactly what `prefers-reduced-motion` asks for.
+   * Render this moment as a still, with no timeline. Every value is resolved to
+   * a constant so the frame is correct even if the render loop never advances -
+   * which is exactly what `prefers-reduced-motion` asks for.
    */
   staticMoment?: number
   className?: string
@@ -49,32 +54,30 @@ export interface IntroSceneProps {
  * The opening sequence: darkness, Earth, the solar system, then the deep field.
  *
  * All choreography lives in `src/lib/introTimeline.ts`; this file only draws it.
- * Every caption it drives is written to state what is real and what is not.
+ * Every caption it drives states what is real and what is not.
  */
 export function IntroScene({ clock, onStage, staticMoment, className = '' }: IntroSceneProps) {
-  const earthReveal = useRef(0)
-  const systemReveal = useRef(0)
-  const nebulaIntensity = useRef(introNebulaIntensity(0))
-  const galaxyReveal = useRef(0)
+  const moment = staticMoment ?? 0
 
-  // A still has no timeline to advance, so every reveal is set for that moment.
-  // Writing refs during render is safe here: they are read inside `useFrame`,
-  // never during render, and this component has no other state.
-  if (staticMoment !== undefined) {
-    earthReveal.current = introEarthReveal(staticMoment)
-    systemReveal.current = introSystemReveal(staticMoment)
-    nebulaIntensity.current = introNebulaIntensity(staticMoment)
-    galaxyReveal.current = introGalaxyReveal(staticMoment)
-  }
+  // Nothing here is mutated: each value is the pure function that produces it.
+  const reveals = useMemo(
+    () => ({
+      earth: { clock, of: introEarthReveal },
+      system: { clock, of: introSystemReveal },
+      nebula: { clock, of: introNebulaIntensity },
+      galaxy: { clock, of: introGalaxyReveal },
+    }),
+    [clock],
+  )
 
-  const startPosition: [number, number, number] =
-    staticMoment !== undefined ? sampleIntroCamera(staticMoment).position : [0, 0.95, 15]
+  const live = (value: LiveValue): LiveOrStatic =>
+    staticMoment === undefined ? value : value.of(staticMoment)
 
   return (
     <LazyCanvas
       label="Opening sequence: the camera moves from a star field in towards a rotating Earth, then pulls back past the Sun and planets into a field of nebulae and galaxies. Every visual is labelled as NASA imagery or as a simulation."
       className={className}
-      cameraPosition={startPosition}
+      cameraPosition={sampleIntroCamera(moment).position}
       cameraFov={42}
       cameraFar={1400}
       animated={staticMoment === undefined}
@@ -82,16 +85,9 @@ export function IntroScene({ clock, onStage, staticMoment, className = '' }: Int
         <div className="absolute inset-0 bg-[radial-gradient(60%_50%_at_62%_45%,#123a63_0%,#060a18_60%,#04050c_100%)]" />
       }
     >
-      <CameraRig
-        clock={clock}
-        onStage={onStage}
-        earthReveal={earthReveal}
-        systemReveal={systemReveal}
-        nebulaIntensity={nebulaIntensity}
-        galaxyReveal={galaxyReveal}
-      />
+      <CameraRig clock={clock} onStage={onStage} />
 
-      <NebulaBackdrop radius={520} intensity={0.3} intensityRef={nebulaIntensity} />
+      <NebulaBackdrop radius={520} intensity={live(reveals.nebula)} />
       <Stars radius={430} depth={200} count={6500} factor={7} saturation={0} fade speed={0.12} />
 
       <ambientLight intensity={0.07} color="#8fb4ff" />
@@ -101,44 +97,27 @@ export function IntroScene({ clock, onStage, staticMoment, className = '' }: Int
         color="#fff4e2"
       />
 
-      {/* Stage 2-3: the planet itself. */}
-      <EarthGlobe revealRef={earthReveal} />
+      {/* Stages 2-3: the planet itself. */}
+      <EarthGlobe reveal={live(reveals.earth)} />
 
       {/* Stages 4-5: everything beyond Earth. */}
       <group position={SOLAR_ANCHOR}>
-        <SolarTableau revealRef={systemReveal} />
+        <SolarTableau reveal={live(reveals.system)} />
       </group>
-      <DistantGalaxies revealRef={galaxyReveal} />
+      <DistantGalaxies reveal={live(reveals.galaxy)} />
     </LazyCanvas>
   )
 }
 
 /* --------------------------------------------------------------- camera rig -- */
 
-interface CameraRigProps {
-  clock: RefObject<number>
-  onStage?: (index: number) => void
-  earthReveal: RefObject<number>
-  systemReveal: RefObject<number>
-  nebulaIntensity: RefObject<number>
-  galaxyReveal: RefObject<number>
-}
-
 /**
- * Single owner of the per-frame choreography.
+ * Moves the camera along the choreographed path and reports stage changes.
  *
- * It reads the shared clock, moves the camera, derives every reveal value into
- * refs, and reports stage changes - which is the only thing that touches React
- * state, and only five times in the whole sequence.
+ * Stage boundaries are the only thing in the sequence that touches React state,
+ * and there are five of them, so nothing re-renders per frame.
  */
-function CameraRig({
-  clock,
-  onStage,
-  earthReveal,
-  systemReveal,
-  nebulaIntensity,
-  galaxyReveal,
-}: CameraRigProps) {
+function CameraRig({ clock, onStage }: Pick<IntroSceneProps, 'clock' | 'onStage'>) {
   const camera = useThree((state) => state.camera)
   const lastStage = useRef(-1)
 
@@ -150,11 +129,6 @@ function CameraRig({
       lastStage.current = stage
       onStage?.(stage)
     }
-
-    earthReveal.current = introEarthReveal(t)
-    systemReveal.current = introSystemReveal(t)
-    nebulaIntensity.current = introNebulaIntensity(t)
-    galaxyReveal.current = introGalaxyReveal(t)
 
     const { position, target } = sampleIntroCamera(t)
     camera.position.set(position[0], position[1], position[2])
@@ -173,25 +147,36 @@ function CameraRig({
  * equalised rather than falling off with distance - at Neptune's real distance a
  * physically-lit scene would be almost black on screen.
  */
-function SolarTableau({ revealRef }: { revealRef: RefObject<number> }) {
-  const bodies = PLANETS.filter((planet) => planet.order > 0)
-  const sun = PLANETS.find((planet) => planet.order === 0)
+function SolarTableau({ reveal }: { reveal: LiveOrStatic }) {
+  const bodies = useMemo(() => PLANETS.filter((planet) => planet.order > 0), [])
+  const sun = useMemo(() => PLANETS.find((planet) => planet.order === 0), [])
+
+  // Constants for a still, 0 while the animated sequence is still dark.
+  const initial = typeof reveal === 'number' ? reveal : 0
 
   const sunMaterial = useRef<THREE.MeshBasicMaterial>(null)
   const glowMaterial = useRef<THREE.ShaderMaterial>(null)
+  const planetMaterials = useRef<THREE.MeshStandardMaterial[]>([])
+  const ringMaterials = useRef<THREE.MeshBasicMaterial[]>([])
 
   const glowUniforms = useMemo(
     () => ({
       uColor: { value: hexToLinear('#ffb163') },
-      uReveal: { value: 0 },
+      uReveal: { value: initial },
     }),
-    [],
+    [initial],
   )
 
   useFrame(() => {
-    const reveal = revealRef.current ?? 0
-    if (sunMaterial.current) sunMaterial.current.opacity = reveal
-    if (glowMaterial.current) glowMaterial.current.uniforms.uReveal.value = reveal
+    const value = typeof reveal === 'number' ? reveal : reveal.of(reveal.clock.current ?? 0)
+    if (sunMaterial.current) sunMaterial.current.opacity = value
+    if (glowMaterial.current) glowMaterial.current.uniforms.uReveal.value = value
+    for (const material of planetMaterials.current) {
+      if (material) material.opacity = value
+    }
+    for (const material of ringMaterials.current) {
+      if (material) material.opacity = RING_OPACITY * value
+    }
   })
 
   const sunRadius = (sun?.bodyRadius ?? 0.5) * SUN_ENLARGE
@@ -205,6 +190,7 @@ function SolarTableau({ revealRef }: { revealRef: RefObject<number> }) {
           ref={sunMaterial}
           color={hexToLinear(sun?.color ?? '#ffb454')}
           transparent
+          opacity={initial}
           toneMapped={false}
         />
       </mesh>
@@ -215,7 +201,7 @@ function SolarTableau({ revealRef }: { revealRef: RefObject<number> }) {
           vertexShader={SUN_GLOW_VERT}
           fragmentShader={SUN_GLOW_FRAG}
           uniforms={glowUniforms}
-          side={THREE.BackSide}
+          side={THREE.FrontSide}
           transparent
           depthWrite={false}
           blending={THREE.AdditiveBlending}
@@ -224,7 +210,7 @@ function SolarTableau({ revealRef }: { revealRef: RefObject<number> }) {
       </mesh>
 
       {/* Faint orbit rings, just enough to read the layout as a system. */}
-      {bodies.map((planet) => (
+      {bodies.map((planet, index) => (
         <mesh key={`orbit-${planet.id}`} rotation={[-Math.PI / 2, 0, 0]}>
           <ringGeometry
             args={[
@@ -234,23 +220,29 @@ function SolarTableau({ revealRef }: { revealRef: RefObject<number> }) {
             ]}
           />
           <meshBasicMaterial
+            ref={(material) => {
+              if (material) ringMaterials.current[index] = material
+            }}
             color="#5d7bb8"
             transparent
-            opacity={0.16}
+            opacity={RING_OPACITY * initial}
             side={THREE.DoubleSide}
             depthWrite={false}
           />
         </mesh>
       ))}
 
-      {bodies.map((planet) => (
+      {bodies.map((planet, index) => (
         <Planet
           key={planet.id}
           color={planet.color}
           orbitRadius={planet.orbitRadius * ORBIT_SPREAD}
           bodyRadius={planet.bodyRadius * BODY_ENLARGE}
           order={planet.order}
-          revealRef={revealRef}
+          initialReveal={initial}
+          onMaterial={(material) => {
+            if (material) planetMaterials.current[index] = material
+          }}
         />
       ))}
     </group>
@@ -262,34 +254,37 @@ interface PlanetProps {
   orbitRadius: number
   bodyRadius: number
   order: number
-  revealRef: RefObject<number>
+  initialReveal: number
+  onMaterial: (material: THREE.MeshStandardMaterial | null) => void
 }
 
-function Planet({ color, orbitRadius, bodyRadius, order, revealRef }: PlanetProps) {
-  const material = useRef<THREE.MeshStandardMaterial>(null)
-
-  // Real orbital periods set the phase: outer planets travel slower, so the
-  // spread across the frame is not arbitrary.
+function Planet({
+  color,
+  orbitRadius,
+  bodyRadius,
+  order,
+  initialReveal,
+  onMaterial,
+}: PlanetProps) {
+  // A fixed phase per planet, in orbital order, so the spread across the frame
+  // is stable rather than random.
   const angle = useMemo(() => (order * 2.399) % (Math.PI * 2), [order])
   const position = useMemo<[number, number, number]>(
     () => [Math.cos(angle) * orbitRadius, 0, Math.sin(angle) * orbitRadius],
     [angle, orbitRadius],
   )
 
-  useFrame(() => {
-    if (material.current) material.current.opacity = revealRef.current ?? 0
-  })
-
   return (
     <group position={position}>
       <mesh>
         <sphereGeometry args={[bodyRadius, 40, 40]} />
         <meshStandardMaterial
-          ref={material}
+          ref={onMaterial}
           color={hexToLinear(color)}
           roughness={0.92}
           metalness={0.02}
           transparent
+          opacity={initialReveal}
         />
       </mesh>
 
@@ -300,7 +295,7 @@ function Planet({ color, orbitRadius, bodyRadius, order, revealRef }: PlanetProp
           <meshBasicMaterial
             color="#e6d3a8"
             transparent
-            opacity={0.42}
+            opacity={0.42 * initialReveal}
             side={THREE.DoubleSide}
             depthWrite={false}
           />
@@ -322,10 +317,9 @@ function seededPositions(count: number): [number, number, number][] {
 
   const positions: [number, number, number][] = []
   for (let i = 0; i < count; i++) {
-    // Shell between 240 and 430 units, biased outward.
+    // A shell between 240 and 430 units out, biased outward.
     const radius = 240 + Math.pow(random(), 0.65) * 190
     const theta = random() * Math.PI * 2
-    // Keep the field off the ecliptic plane so it does not tangle with the rings.
     const phi = Math.acos(1 - 2 * random())
     positions.push([
       radius * Math.sin(phi) * Math.cos(theta),
@@ -336,9 +330,11 @@ function seededPositions(count: number): [number, number, number][] {
   return positions
 }
 
-function DistantGalaxies({ revealRef }: { revealRef: RefObject<number> }) {
+function DistantGalaxies({ reveal }: { reveal: LiveOrStatic }) {
   const group = useRef<THREE.Group>(null)
   const materials = useRef<THREE.ShaderMaterial[]>([])
+
+  const initial = typeof reveal === 'number' ? reveal : 0
 
   const galaxies = useMemo(() => {
     const positions = seededPositions(16)
@@ -353,7 +349,7 @@ function DistantGalaxies({ revealRef }: { revealRef: RefObject<number> }) {
       return {
         position,
         quaternion,
-        // A spread of sizes and shapes reads as depth rather than decals.
+        // A spread of sizes and shapes reads as depth rather than as decals.
         size: 9 + (index % 5) * 5.5 + (index % 3) * 2.5,
         squash: 0.26 + ((index * 7) % 5) * 0.12,
         spiral: 1.6 + ((index * 3) % 4) * 0.85,
@@ -366,19 +362,19 @@ function DistantGalaxies({ revealRef }: { revealRef: RefObject<number> }) {
     uCore: { value: hexToLinear(warm ? '#ffe6c2' : '#e8eeff') },
     uArm: { value: hexToLinear(warm ? '#c98a5a' : '#7f9dd8') },
     uSpiral: { value: spiral },
-    uReveal: { value: 0 },
+    uReveal: { value: initial },
   })
 
   useFrame(() => {
-    const reveal = revealRef.current ?? 0
-    if (group.current) group.current.visible = reveal > 0.002
+    const value = typeof reveal === 'number' ? reveal : reveal.of(reveal.clock.current ?? 0)
+    if (group.current) group.current.visible = value > 0.002
     for (const material of materials.current) {
-      if (material) material.uniforms.uReveal.value = reveal
+      if (material) material.uniforms.uReveal.value = value
     }
   })
 
   return (
-    <group ref={group} visible={false}>
+    <group ref={group} visible={initial > 0.002}>
       {galaxies.map((galaxy, index) => (
         <mesh
           key={index}
