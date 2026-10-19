@@ -1,0 +1,204 @@
+@import 'tailwindcss';
+
+/* ------------------------------------------------------------------
+   Design tokens. Every value here becomes a Tailwind utility:
+   --color-ion  ->  bg-ion / text-ion / border-ion / ring-ion
+   Never hardcode a hex value inside a component.
+------------------------------------------------------------------- */
+@theme {
+  /* Surfaces */
+  --color-void: #04050c;
+  --color-abyss: #080b16;
+  --color-panel: #0e1220;
+  --color-panel-2: #151a2c;
+  --color-hairline: rgba(148, 163, 184, 0.14);
+  --color-hairline-strong: rgba(148, 163, 184, 0.28);
+
+  /* Text */
+  --color-ink: #eef1fb;
+  --color-ink-muted: #98a5c6;
+  --color-ink-faint: #6b7796;
+
+  /* Accents - one per section */
+  --color-ion: #5ce1e6;
+  --color-solar: #ffb454;
+  --color-nebula: #a78bfa;
+  --color-bio: #4ade80;
+  --color-danger: #f87171;
+
+  /* Typography */
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+
+  /* Motion */
+  --ease-out-soft: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    /* Keep anchored sections clear of the fixed navbar. */
+    scroll-padding-top: 5.5rem;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-void);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* The starfield canvas lives behind everything. */
+    overflow-x: hidden;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    line-height: 1.12;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-ion) 35%, transparent);
+    color: #fff;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ion);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  /* Scrollbar: thin, dark, unobtrusive. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #232a44 var(--color-void);
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: var(--color-void);
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #232a44;
+    border-radius: 999px;
+    border: 2px solid var(--color-void);
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: #333c60;
+  }
+}
+
+@layer components {
+  /* Page container used by every section. */
+  .shell {
+    width: 100%;
+    max-width: 80rem;
+    margin-inline: auto;
+    padding-inline: 1.25rem;
+  }
+  @media (min-width: 640px) {
+    .shell {
+      padding-inline: 2rem;
+    }
+  }
+
+  /* The "glass over space" panel surface. */
+  .panel {
+    background: color-mix(in srgb, var(--color-panel) 72%, transparent);
+    border: 1px solid var(--color-hairline);
+    border-radius: 1rem;
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+  }
+
+  .eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--color-ink-faint);
+  }
+
+  /* Long-form science copy. */
+  .prose-space {
+    color: var(--color-ink-muted);
+    max-width: 68ch;
+  }
+  .prose-space > p + p {
+    margin-top: 0.9rem;
+  }
+  .prose-space strong {
+    color: var(--color-ink);
+    font-weight: 600;
+  }
+
+  /* Scrim that keeps type readable over live 3D. */
+  .scrim-b {
+    background: linear-gradient(to bottom, transparent, var(--color-void));
+  }
+  .scrim-t {
+    background: linear-gradient(to top, transparent, var(--color-void));
+  }
+}
+
+@layer utilities {
+  /* Scroll-reveal. `useInView` flips data-visible; the CSS does the rest. */
+  .reveal {
+    opacity: 0;
+    transform: translateY(22px);
+    transition:
+      opacity 0.7s var(--ease-out-soft),
+      transform 0.7s var(--ease-out-soft);
+    transition-delay: calc(var(--i, 0) * 70ms);
+    will-change: opacity, transform;
+  }
+  .reveal[data-visible='true'] {
+    opacity: 1;
+    transform: none;
+  }
+
+  .text-glow {
+    text-shadow: 0 0 32px color-mix(in srgb, var(--color-ion) 45%, transparent);
+  }
+
+  .mask-fade-b {
+    mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+  }
+
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* ------------------------------------------------------------------
+   Reduced motion contract: every animation in the site must be off.
+------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
