@@ -122,6 +122,21 @@ class Session {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+/**
+ * Poll a browser-side expression until it is truthy.
+ *
+ * A cold load from the dev server can take a while to mount React, so the smoke
+ * test never asserts against a fixed delay - it waits for the thing it needs.
+ */
+async function waitFor(session, expression, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (await session.evaluate(expression)) return true
+    await sleep(200)
+  }
+  return false
+}
+
 async function main() {
   const browserPath = findBrowser()
   if (!browserPath) {
@@ -204,7 +219,10 @@ async function main() {
 
     // --- 1. opening sequence ------------------------------------------
     // The profile is fresh, so this is a first visit: it must be playing.
-    await sleep(1200)
+    const mounted = await waitFor(session, `!!document.querySelector('#top h1')`)
+    if (!mounted) fail('The app never mounted')
+    await sleep(300)
+
     const intro = await session.evaluate(`
       (() => {
         const overlay = document.querySelector('[data-testid="intro-overlay"]')
@@ -228,8 +246,16 @@ async function main() {
 
     // Skip it, and make sure it genuinely lets go of the page.
     if (intro.present) {
+      const clickAt = Date.now()
       await session.evaluate(`document.querySelector('[data-intro-dismiss]')?.click()`)
-      await sleep(900)
+      // Generous: software-rendered WebGL can hold the main thread for seconds
+      // while the first shaders compile, which delays the exit timer.
+      const dismissed = await waitFor(
+        session,
+        `!document.querySelector('[data-testid="intro-overlay"]')`,
+        15_000,
+      )
+      const skipTook = Date.now() - clickAt
       const skipped = await session.evaluate(`
         (() => ({
           present: !!document.querySelector('[data-testid="intro-overlay"]'),
@@ -238,17 +264,20 @@ async function main() {
             .some((button) => /replay/i.test(button.textContent ?? '')),
         }))()
       `)
-      if (skipped.present) fail('Skip intro did not dismiss the opening sequence')
+      if (!dismissed || skipped.present) fail('Skip intro did not dismiss the opening sequence')
       if (skipped.scrollLocked) fail('Skip intro left the page scroll-locked')
       if (!skipped.replay) fail('No replay control in the hero after the intro')
-      note('Opening sequence: played on first visit, skipped cleanly, replay control present')
+      note(
+        `Opening sequence: played on first visit, skipped in ${skipTook}ms, replay control present`,
+      )
     }
 
     // A normal reload must not show it again.
     const reloaded = new Promise((resolve) => session.on('Page.loadEventFired', resolve))
     await session.send('Page.reload')
     await reloaded
-    await sleep(2000)
+    await waitFor(session, `!!document.querySelector('#top h1')`)
+    await sleep(600)
     const afterReload = await session.evaluate(`
       (() => ({
         present: !!document.querySelector('[data-testid="intro-overlay"]'),
@@ -262,7 +291,8 @@ async function main() {
     note('Opening sequence: refused to replay on reload')
 
     // Let React mount and the lazily-mounted canvases initialise.
-    await sleep(4000)
+    await waitFor(session, `document.querySelectorAll('section').length >= 6`)
+    await sleep(3500)
 
     // --- 2. structure -------------------------------------------------
     const structure = await session.evaluate(`
@@ -275,8 +305,15 @@ async function main() {
           navLinks: [...document.querySelectorAll('nav a[href^="#"]')].map((a) => a.getAttribute('href')),
           canvasCount: document.querySelectorAll('canvas').length,
           sectionCount: document.querySelectorAll('section').length,
-          cloudTexture: performance.getEntriesByType('resource')
-            .some((entry) => entry.name.includes('earth-clouds-2048')),
+          textures: performance
+            .getEntriesByType('resource')
+            .filter((entry) => /earth-(day|night|clouds)/.test(entry.name))
+            .map((entry) => ({
+              name: entry.name.split('/').pop(),
+              status: entry.responseStatus ?? 0,
+              bytes: entry.transferSize ?? 0,
+              decoded: entry.decodedBodySize ?? 0,
+            })),
           provenance: !!document.querySelector('#top details a[href*="blue-marble"]'),
         }
       })()
@@ -292,10 +329,18 @@ async function main() {
     for (const id of ['#space', '#earth', '#science', '#human', '#discovery']) {
       if (!structure.navLinks.includes(id)) fail(`Navbar is missing a link to ${id}`)
     }
-    if (!structure.cloudTexture) fail('The hero never requested the NASA cloud texture')
+    // A texture that fails to load leaves the globe as a plain blue ball, so
+    // this checks the response rather than "a request happened".
+    const expectedTextures = ['earth-day-2048.png', 'earth-night-3600.jpg', 'earth-clouds-2048.jpg']
+    for (const name of expectedTextures) {
+      const hit = structure.textures.find((texture) => texture.name === name)
+      if (!hit) fail(`The hero never requested ${name}`)
+      else if (hit.status >= 400) fail(`${name} failed to load (HTTP ${hit.status})`)
+      else if (!hit.bytes && !hit.decoded) fail(`${name} came back empty`)
+    }
     if (!structure.provenance) fail('The hero does not link the globe textures to their source')
     note(`Canvases on the page: ${structure.canvasCount}`)
-    note('Hero: cloud texture loaded and texture provenance linked')
+    note('Hero: 3 textures loaded with HTTP 200 and the provenance links are present')
 
     // --- 3. WebGL actually works -------------------------------------
     // Pick a canvas that is inside a scene region: the first canvas on the page
@@ -412,7 +457,8 @@ async function main() {
     const stillReloaded = new Promise((resolve) => session.on('Page.loadEventFired', resolve))
     await session.send('Page.reload')
     await stillReloaded
-    await sleep(2000)
+    await waitFor(session, `!!document.querySelector('#top h1')`)
+    await sleep(600)
 
     const stillIntro = await session.evaluate(`
       (() => {

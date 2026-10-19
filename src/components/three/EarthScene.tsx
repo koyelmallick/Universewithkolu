@@ -29,6 +29,12 @@ function SunLight() {
 
 export interface EarthSceneProps {
   className?: string
+  /**
+   * Stop the render loop without unmounting. The opening sequence covers the
+   * hero, so there is no reason to bake a second full-screen scene underneath
+   * it; the canvas keeps its last frame and resumes when the sequence lifts.
+   */
+  paused?: boolean
 }
 
 /**
@@ -38,7 +44,7 @@ export interface EarthSceneProps {
  * Everything here is either a NASA observation or an explicitly labelled
  * simulation - see `TEXTURE_CREDITS` in `src/data/media.ts`.
  */
-export function EarthScene({ className = '' }: EarthSceneProps) {
+export function EarthScene({ className = '', paused = false }: EarthSceneProps) {
   const reducedMotion = useReducedMotion()
   const isDesktop = useMediaQuery('(min-width: 1024px)')
 
@@ -54,7 +60,7 @@ export function EarthScene({ className = '' }: EarthSceneProps) {
       className={className}
       cameraPosition={[0, 0, 3.15]}
       cameraFov={42}
-      animated
+      animated={!paused}
       fallback={
         <div className="h-56 w-56 rounded-full bg-[radial-gradient(circle_at_32%_28%,#3b82f6_0%,#0b3a63_45%,#04070f_100%)] shadow-[0_0_120px_rgba(59,130,246,0.35)]" />
       }

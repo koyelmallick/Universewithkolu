@@ -150,6 +150,17 @@ the user. A wrong number in an educational site is worse than a missing one.
 - Download the pixels you ship into `public/` (as the Blue Marble textures are) rather
   than hot-linking. Three reasons: no CORS surprises in WebGL, no third-party tracking
   for viewers, and the site does not break when an agency reorganises its CDN.
+- **A texture is an image and needs a source too.** The pixels wrapped onto a 3D body are
+  registered in `TEXTURE_CREDITS` in `src/data/media.ts` with the same `SourceRef` shape
+  as a `MediaAsset`, plus a `caveat` saying what the render adds that the observation
+  does not. `GLOBE_CAVEAT` states the general case once: the globe is a real NASA map on
+  a sphere with the relief exaggerated - real imagery, not a photograph of Earth from
+  space. `Hero.tsx` renders both in a collapsed "What this globe is made of" `<details>`,
+  and `ALL_SOURCES` in `src/data/index.ts` folds them into the footer list.
+- Credit the *producing institution and the asset title*, then link the agency's own page
+  for it - not the raw file URL. Blue Marble textures cite the NASA Earth Observatory's
+  Blue Marble: Next Generation page; the night map cites NASA's Earth at Night; the cloud
+  composite cites the same Blue Marble page it came from.
 
 ## 8. Review checklist for any content change
 

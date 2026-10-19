@@ -29,6 +29,8 @@ const HERO_STATS = [
 export interface HeroProps {
   /** Present once the opening sequence exists; re-runs it without a reload. */
   onReplayIntro?: () => void
+  /** True while the opening sequence covers the hero. */
+  paused?: boolean
 }
 
 /**
@@ -37,7 +39,7 @@ export interface HeroProps {
  * The scrim is `pointer-events-none` so dragging still reaches the globe, and
  * the ambient glow is a CSS radial gradient rather than a bloom pass.
  */
-export function Hero({ onReplayIntro }: HeroProps) {
+export function Hero({ onReplayIntro, paused = false }: HeroProps) {
   return (
     <section
       id="top"
@@ -45,7 +47,7 @@ export function Hero({ onReplayIntro }: HeroProps) {
     >
       {/* Live 3D globe. Absolute so it never affects layout height. */}
       <div className="absolute inset-0 -z-10">
-        <EarthScene className="h-full w-full" />
+        <EarthScene className="h-full w-full" paused={paused} />
       </div>
 
       {/* Left-to-right scrim: keeps the headline readable over the globe. */}

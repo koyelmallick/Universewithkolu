@@ -38,7 +38,7 @@ export default function App() {
       <Navbar />
 
       <main>
-        <Hero onReplayIntro={replayIntro} />
+        <Hero onReplayIntro={replayIntro} paused={introActive} />
         <ExploreSpace />
         <ExploreEarth />
         <UnderstandScience />

@@ -33,11 +33,12 @@ production build.
 ```
 src/__tests__/
   content.test.ts        # data integrity - the highest-value tests here
-  components.test.tsx    # render + interaction of non-3D UI
+  components.test.tsx    # render + interaction of non-3D UI, and the intro overlay
+  intro.test.ts          # the opening sequence's timeline and memory - no GPU needed
   setup.tsx              # jsdom + R3F/WebGL mocks (`.tsx`: it renders JSX)
 ```
 
-54 tests across the two files, all expected to pass.
+70 tests across the three files, all expected to pass.
 
 ### Content tests are the important ones
 
@@ -108,6 +109,30 @@ Three further pieces of setup, each of which broke something when it was missing
 Do not attempt `headless-gl` or `jest-webgl-canvas-mock` - heavy, flaky on Windows, and
 unnecessary. Use `scripts/smoke.mjs` for genuine GPU coverage instead (section 4).
 
+### Testing the opening sequence
+
+The intro is the one place where React state, a `requestAnimationFrame` clock and a WebGL
+scene meet, so it is tested at each seam separately:
+
+- **`intro.test.ts`** covers `introTimeline.ts` (stage maths, camera sampling, reveal
+  monotonicity, no `NaN` anywhere in the sweep) and `introStorage.ts` (the seen flag
+  round-trip, and that a deep link suppresses autoplay). Both are pure, so these run
+  instantly and never touch a canvas.
+- **`components.test.tsx`** mounts `<IntroSequence />` and asserts it is a dialog with a
+  skip control, that it marks itself seen on mount, that Skip and Escape both call
+  `onDone`, and that the hero hides the replay button when no sequence exists.
+
+Three things to know when writing more of these:
+
+- `useFrame` is mocked to a no-op, so `CameraRig` never runs and the stage never changes.
+  Test the timeline directly instead of trying to advance the animation.
+- `onDone` fires after a 420 ms fade (0 ms under reduced motion), so assert with
+  `waitFor(..., { timeout: 2000 })`. A bare `expect` right after the click will fail.
+- The overlay renders alongside the page in every `<App />` test, and its prose repeats
+  words that also appear in the hero. Prefer `getAllByText(...).length` over
+  `getByText(...)` in App-level tests; `setup.tsx` clears `localStorage` between tests so
+  the sequence reappears in each one.
+
 ### Interaction tests
 
 Test the things a user actually clicks: nav anchors resolve to real section ids, topic tabs
@@ -135,18 +160,28 @@ is usually a real accessibility bug, not a test bug.
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | Load `/` | Hero Earth renders, spins, no console errors. |
-| 2 | Scroll through every section | Nav highlights the active section. |
-| 3 | Click every nav link | Smooth-scrolls to the matching `id`; no 404 anchor. |
-| 4 | Drag the hero Earth | Camera rotates within its azimuth clamp, does not spin out or invert. |
-| 5 | Scroll past a 3D section and back | Canvas does not blank, flicker, or remount (it pauses via `frameloop="demand"`). |
-| 6 | Switch topic tabs in a section | The old scene unmounts, the new one mounts, the caption changes. |
-| 7 | Resize to 390px wide | No horizontal scrollbar; headline clears the globe. |
-| 8 | Tab through the page | Every interactive element shows a focus ring. |
-| 9 | Console | Zero errors; no `THREE.WebGLRenderer: Context Lost`. |
+| 1 | Load `/` in a fresh profile | The opening sequence plays: darkness, Earth, the solar system, galaxies, then the headline. |
+| 2 | Click `Skip intro` (or press Escape) | The overlay fades, the page scrolls normally, the hero headline takes focus. |
+| 3 | Reload | The sequence does not play again. |
+| 4 | Click `Replay opening` in the hero | The sequence plays again from the top. |
+| 5 | Open with `#science` in the URL | No sequence at all. |
+| 6 | Set the OS reduced-motion preference, reload | A single still frame, no camera move, auto-enters the site after ~6 s. |
+| 7 | Scroll through every section | Nav highlights the active section. |
+| 8 | Click every nav link | Smooth-scrolls to the matching `id`; no 404 anchor. |
+| 9 | Drag the hero Earth | Camera rotates within its azimuth clamp, does not spin out or invert. |
+| 10 | Scroll past a 3D section and back | Canvas does not blank, flicker, or remount (it pauses via `frameloop="demand"`). |
+| 11 | Switch topic tabs in a section | The old scene unmounts, the new one mounts, the caption changes. |
+| 12 | Resize to 390px wide | No horizontal scrollbar; headline clears the globe. |
+| 13 | Tab through the page | Every interactive element shows a focus ring. |
+| 14 | Console | Zero errors; no `THREE.WebGLRenderer: Context Lost`. |
 
-Steps 1, 2, 5, 6 and 7 are automated by the smoke test below - run it instead of doing
-them by hand, then do 4, 8 and 9 manually.
+Steps 1-6, 7, 8, 10, 11 and 12 are automated by the smoke test below - run it instead of
+doing them by hand, then do 9, 13 and 14 manually.
+
+**Watch the frame rate on the opening sequence.** It is the only place where a full-screen
+noise backdrop, a textured planet and a star field run together. If a low-end machine
+struggles, the fix is to lower the intro's star count or the nebula's octaves - not to
+disable the sequence.
 
 ## 4. Real-browser smoke test (`scripts/smoke.mjs`)
 
@@ -163,28 +198,67 @@ node scripts/smoke.mjs http://localhost:5178    # or: npm run smoke  (defaults t
 It launches headless Chrome with software WebGL (`--enable-unsafe-swiftshader`,
 `--use-gl=angle`) so shaders are genuinely compiled and executed, then asserts:
 
-1. no console errors and no uncaught exceptions,
-2. all six sections and their anchor targets exist,
-3. the hero created a WebGL context with a non-zero drawing buffer,
-4. clicking the Jupiter and Black holes tabs changes the rendered content,
-5. no horizontal overflow at 390, 768 and 1920 px,
-6. reduced-motion mode loads cleanly, and no image is broken.
+1. the opening sequence plays on a first visit, is exposed as a dialog, locks page scroll,
+   and has a skip control,
+2. Skip dismisses it and releases the scroll lock, and the hero then offers `Replay`,
+3. a reload does not replay it (the `etu:intro-seen-v1` flag was written),
+4. no console errors and no uncaught exceptions,
+5. all six sections and their anchor targets exist,
+6. the hero created a WebGL context with a non-zero drawing buffer,
+7. all three Earth textures returned HTTP < 400 with a body, and the hero links them to
+   their source,
+8. clicking the Jupiter and Black holes tabs changes the rendered content,
+9. no horizontal overflow at 390, 768 and 1920 px,
+10. under reduced motion, the still opening renders, is labelled, and auto-dismisses,
+    leaving the page intact.
 
 It exits 0 with `All checks passed` or non-zero listing each failure, and prints the
 console warnings it saw as notes.
 
-**Two traps when writing more checks like this:**
+**Never assert against a fixed delay.** A cold dev-server load mounts React in a
+second or several, and under a software rasteriser the main thread can stall for seconds
+while shaders compile. The script polls (`waitFor`) for the thing it needs instead, and
+gives the skip check a 15 s budget - it measured a real 3.3 s dismissal that a tighter
+timeout would have reported as a failure.
+
+**Three traps when writing more checks like this:**
 
 - `document.querySelector('canvas')` returns the **2D `Starfield` backdrop**, not a scene.
   Find a scene canvas via `closest('[role="img"]')` - `LazyCanvas` sets that role and an
   `aria-label`.
 - Wait for the scene to actually mount. Canvases appear on intersection with a 220px root
   margin, so poll for the drawing buffer rather than reading it immediately after load.
+- A texture that 404s still appears in `performance.getEntriesByType('resource')`, so
+  checking that a request happened proves nothing. Read `responseStatus` and
+  `transferSize` (a cache hit legitimately reports ~300 bytes and a status of 200 - accept
+  it; check `decodedBodySize` too if you want to be strict).
+
+### Capturing stills of the opening sequence (`scripts/intro-shots.mjs`)
+
+```powershell
+node scripts/intro-shots.mjs http://localhost:5178     # every stage, then the hero at 3 widths
+node scripts/intro-shots.mjs http://localhost:5178 3   # just stage 3
+```
+
+Writes PNGs to `%TEMP%\etu-intro-shots\` and prints, per shot, which of the six moments it
+actually caught. It waits on the sequence's own progress bar (`div[style*="scaleX"]`), so
+it aims at a *stage* rather than at a wall-clock second.
+
+Two environment facts that shape the tool:
+
+- A full-screen WebGL scene under SwiftShader takes seconds to rasterise, and a
+  `Page.captureScreenshot` with `fromSurface: true` waits for the compositor to produce a
+  fresh surface. The capture then reflects a moment well after the one you asked for. The
+  script passes `fromSurface: false` for that reason.
+- Chrome's `requestAnimationFrame` timestamps can lag wall time when the compositor is
+  backlogged, so the sequence appears to run slower than its real ~18 seconds. This is not
+  a timeline bug; the clock is `performance.now()`-based and correct on real hardware.
 
 ## 5. Failure modes specific to this stack
 
 | Console message | Real cause | Fix |
 | --- | --- | --- |
+| The globe renders as a smooth blue sphere with no continents or city lights | The Blue Marble textures failed to load, so `useSafeTexture` handed back `null` and the ocean-blue `meshStandardMaterial` fallback rendered. It looks plausible, which is what makes it dangerous. | Check the resource status for `/textures/earth-*.{png,jpg}`; `scripts/smoke.mjs` now fails on a non-200. Re-download the file into `public/textures/`. |
 | `Cannot read properties of undefined (reading 'x')` in `useFrame` | A ref used before the mesh mounted. | Guard: `if (!ref.current) return`. |
 | `THREE.WebGLRenderer: Context Lost` | Too many live canvases. | Ensure `LazyCanvas` is used; unmount off-screen canvases. |
 | `R3F: Hooks can only be used within the Canvas component!` | Drei/R3F hook (`useThree`, `useFrame`) called outside `<Canvas>`. | Move it into a child component inside the canvas. |
@@ -204,7 +278,7 @@ Do not chase these; they are documented in the README and are not fixable in thi
   emitted by React Three Fiber internals.
 - Vite's `Some chunks are larger than 500 kB` note at build time - the `three` chunk is
   ~1.18 MB (323 kB gzipped) by nature. `manualChunks` already isolates it so the app shell
-  stays ~133 kB.
+  stays ~156 kB (50 kB gzipped).
 - `oxlint`'s `react(set-state-in-effect)` warning, four times, in `useInView`,
   `useReducedMotion`, `useMediaQuery` and `LazyCanvas`. Each of those is deliberately
   synchronising with a browser API the effect just subscribed to - that is the case the
@@ -221,9 +295,11 @@ notes need triage, not silence.
 2. **Is it a lighting problem or a black scene?** Temporarily add
    `<ambientLight intensity={1} />` in dev. If the model appears, the issue is lighting,
    not geometry.
-3. **Is it a texture problem?** Check the Network tab for 403/404 on the image URL.
-   Remote NASA textures do fail; `useSafeTexture` should hand back `null` and the
-   fallback material should render. If you see a magenta sphere, the fallback is missing.
+3. **Is it a texture problem?** Check the Network tab for 403/404 on the image URL. The
+   signature is subtle: with a missing map, `useSafeTexture` returns `null` and the
+   fallback material renders - for the Earth that is a **smooth blue sphere with a clean
+   atmosphere rim**, which looks deliberate rather than broken. `scripts/smoke.mjs` fails
+   on a non-200 texture response for exactly this reason.
 4. **Is it a sizing problem?** Log `size` from `useThree`. `width/height` of 0 means the
    parent had no size at measure time.
 5. **Nothing at all renders?** Check whether `LazyCanvas` decided there is no WebGL - it
@@ -247,6 +323,22 @@ takes the real one.
 
 - `npm run verify` passes (typecheck, lint, test, build).
 - `node scripts/smoke.mjs <dev url>` passes, or its absence is stated explicitly.
-- The manual items 4, 8 and 9 in section 3 have been run, or clearly stated as not run.
+- If you touched the opening sequence or any 3D scene, you have *looked at*
+  `node scripts/intro-shots.mjs <dev url>` output, not just at the test results.
+- The manual items 9, 13 and 14 in section 3 have been run, or clearly stated as not run.
 - Any content fact you could not verify is reported to the user, not silently published.
 - Report the exact commands the user should run.
+
+## 9. Lessons this project paid for
+
+- **A plausibly-good-looking fallback is the worst kind of bug.** A missing Earth texture
+  renders as a smooth blue planet. Always check the *response*, not the request.
+- **Never assert a timeout you have not measured.** The skip button dismisses in ~1.8 s
+  idle and ~3.3 s while the GPU is compiling shaders. The first smoke run failed on a 5 s
+  budget and the product was fine.
+- **Timing-based screenshot scripts drift.** Wait on the app's own progress signal, and
+  freeze the page around the capture (`Emulation.setScriptExecutionDisabled`) rather than
+  racing the render loop.
+- **`--headless=new` plus a full-screen WebGL scene is slow** - single-digit fps under
+  SwiftShader. Absence of smoothness there says nothing about a real GPU; absence of
+  *errors* is the signal worth having.
